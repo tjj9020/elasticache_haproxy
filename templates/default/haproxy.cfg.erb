@@ -1,0 +1,65 @@
+# config for haproxy 1.5.x
+
+global
+        log 127.0.0.1   local0
+        log 127.0.0.1   local1 notice
+        maxconn 100000
+        user haproxy
+        group haproxy
+        daemon
+        tune.bufsize 16384
+        tune.maxrewrite 2048
+
+defaults
+        timeout connect 4s
+        timeout client 30s
+        timeout server 30s
+###############################################################
+#                                                             #
+#                   HAPROXY FRONTEND                          #
+#                                                             #
+###############################################################
+frontend redis-in
+  bind *:6379
+  default_backend redis_backend
+
+###############################################################
+#                                                             #
+#                   HAPROXY BACKEND                           #
+#                                                             #
+###############################################################
+
+backend redis_backend
+  option tcp-check
+  #haproxy will look for the following strings to determine the master
+  #tcp-check send PING\r\n
+  #tcp-check expect string +PONG
+  #tcp-check send info\ replication\r\n
+  #tcp-check expect string role:master
+  #tcp-check send QUIT\r\n
+  #tcp-check expect string +OK
+
+  <% @servers.each_with_index do |s,index| %>
+    server <%=index%> <%=s.fetch(:address)%>:<%=s.fetch(:port)%> check inter 1s
+<% end %>
+
+###############################################################
+#                                                             #
+#                   STATS CONFIGURATION                       #
+#                                                             #
+###############################################################
+userlist stats-auth
+	group admin users <%= @haproxy_admin_user %>
+	user <%= @haproxy_admin_user %> insecure-password <%= @haproxy_admin_password %>
+
+listen internal_stats
+	bind *:8080
+	mode http
+	stats enable
+        stats refresh 30s
+	stats uri /haproxy
+	acl AUTH http_auth(stats-auth)
+	acl AUTH_ADMIN http_auth_group(stats-auth) admin
+	stats http-request auth unless AUTH
+	stats admin if AUTH_ADMIN
+	bind-process 1
